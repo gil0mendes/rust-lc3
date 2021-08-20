@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, path::Path, u16};
+use std::{fs::File, io::Read, path::Path};
 
 use clap::{App, Arg, ArgMatches};
 use emulator::Emulator;
