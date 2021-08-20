@@ -6,6 +6,15 @@ use std::usize;
 /// Represents the size of a LC-3 memory.
 pub const MEMORY_SIZE: usize = u16::MAX as usize;
 
+/// Device registers
+pub enum DeviceRegister {
+    KeyboardStatus = 0xFE00,
+    KeyboardData = 0xFF02,
+    DisplayStatus = 0xFE04,
+    DisplayData = 0xFF06,
+    MachineControl = 0xFFFE,
+}
+
 pub struct Memory {
     /// Memory is a vector of 65_536 positions
     cells: [u16; MEMORY_SIZE],

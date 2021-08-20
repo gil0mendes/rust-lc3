@@ -1,10 +1,13 @@
+use crate::emulator::memory::DeviceRegister;
+
 ///! Constrains the code to implement the Control Unit and ALU of the LC-3 machine.
-use self::{instructions::Instructions, registers::Registers};
+use self::{instructions::Instructions, registers::Registers, system_calls::SystemCall};
 
 use super::memory::Memory;
 
 mod instructions;
 mod registers;
+mod system_calls;
 
 /// This is the default PC value when the CPU starts
 const DEFAULT_PC: u16 = 0x3000;
@@ -63,6 +66,7 @@ impl CPU {
             Some(Instructions::ST) => self.opcode_st(instruction, memory),
             Some(Instructions::STI) => self.opcode_sti(instruction, memory),
             Some(Instructions::STR) => self.opcode_str(instruction, memory),
+            Some(Instructions::TRAP) => self.opcode_trap(instruction, memory),
             _ => panic!("CPU: instruction ({:?}) not implemented", opcode.unwrap()),
         };
     }
@@ -295,5 +299,98 @@ impl CPU {
         let offset = self.sign_extend(instruction & 0x3F, 6);
 
         memory.write(base_addr + offset, self.registers.get(src_index));
+    }
+
+    /// Add a new char to be printed
+    fn put_char(&mut self, char: u16, memory: &mut Memory) {
+        // wait until the screen is ready to get another char
+        while memory.read(DeviceRegister::DisplayStatus as u16) >> 15 != 0x1 {
+            // TODO: maybe use a thread sleep
+        }
+
+        memory.write(DeviceRegister::DisplayData as u16, char);
+    }
+
+    fn opcode_trap(&mut self, instruction: u16, memory: &mut Memory) {
+        let system_call = SystemCall::get(instruction);
+
+        match system_call {
+            // Read a single character from the keyboard. The character is not echoed onto the console. Its ASCII code
+            // is copied into R0. The high eight bits of R0 are cleared.
+            Some(SystemCall::GETC) => {
+                // wait for a char to be ready
+                while memory.read(DeviceRegister::KeyboardStatus as u16) >> 15 != 0x1 {
+                    // TODO: maybe use a thread sleep
+                }
+
+                self.registers.r0 = memory.read(DeviceRegister::KeyboardData as u16);
+            }
+
+            // Write a character in R0[7:0] to the console display.
+            Some(SystemCall::OUT) => {
+                let char = self.registers.r0 as u8 as u16;
+                self.put_char(char, memory);
+            }
+
+            // Write a string of ASCII characters to the console display. The characters are contained in consecutive
+            // memory locations, one character per memory location, starting with the address specified in R0. Writing
+            // terminates with the occurrence of x0000 in a memory location.
+            Some(SystemCall::PUTS) => {
+                let mut addr = self.registers.r0;
+                let mut char = memory.read(addr) as u8 as u16;
+
+                while char != 0x0000 {
+                    self.put_char(char, memory);
+
+                    addr += 1;
+                    char = memory.read(addr) as u8 as u16;
+                }
+            }
+
+            // Print a prompt on the screen and read a single character from the keyboard. The character is echoed onto
+            // the console monitor, and its ASCII code is copied into R0. The high eight bits of R0 are cleared.
+            Some(SystemCall::IN) => {
+                // wait for a char to be ready
+                while memory.read(DeviceRegister::KeyboardStatus as u16) >> 15 != 0x1 {
+                    // TODO: maybe use a thread sleep
+                }
+
+                self.registers.r0 = memory.read(DeviceRegister::KeyboardData as u16);
+
+                self.put_char(self.registers.r0, memory);
+            }
+
+            // Write a string of ASCII characters to the console. The characters are contained in consecutive memory
+            // locations, two characters per memory location, starting with the address specified in R0. The ASCII code
+            // contained in bits [7:0] of a memory location is written to the console first. Then the ASCII code
+            // contained in bits [15:8] of that memory location is written to the console. (A character string
+            // consisting of an odd number of characters to be written will have x00 in bits [15:8] of the memory
+            // location containing the last character to be written.) Writing terminates with the occurrence of x0000 in
+            // a memory location.
+            Some(SystemCall::PUTSP) => {
+                let mut addr = self.registers.r0;
+                let mut char_entry = memory.read(addr);
+
+                while char_entry != 0x0000 {
+                    // decompose entry into two chars
+                    let ch1 = char_entry & 0xFF as u8 as u16;
+                    let ch2 = char_entry >> 8 as u8 as u16;
+
+                    self.put_char(ch1, memory);
+
+                    if ch2 != 0x00 {
+                        self.put_char(ch2, memory);
+                    }
+
+                    addr += 1;
+                    char_entry = memory.read(addr);
+                }
+            }
+            // Halt execution and print a message on the console.
+            Some(SystemCall::HALT) => {
+                memory.write(DeviceRegister::MachineControl as u16, 0x0);
+            }
+            trap_code => panic!("Missing system call {:?}", trap_code),
+        };
     }
 }

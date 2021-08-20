@@ -1,6 +1,6 @@
 use self::{
     cpu::CPU,
-    memory::{Memory, MEMORY_SIZE},
+    memory::{DeviceRegister, Memory, MEMORY_SIZE},
 };
 
 mod cpu;
@@ -37,11 +37,20 @@ impl Emulator {
 
     /// Initiate the execution loop
     pub fn execute(&mut self) {
+        // before start executing we need to enable the machine
+        self.memory
+            .write(DeviceRegister::MachineControl as u16, 0xF);
+
         loop {
             self.cpu.next_tick(&mut self.memory);
 
             if self.cpu.get_registers().pc >= MEMORY_SIZE as u16 {
                 println!("Emulator: out of memory bound");
+                break;
+            }
+
+            // when the machine enters a halt state break the cycle
+            if self.memory.read(DeviceRegister::MachineControl as u16) == 0 {
                 break;
             }
         }
