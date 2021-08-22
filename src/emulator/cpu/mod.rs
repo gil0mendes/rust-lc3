@@ -116,10 +116,12 @@ impl CPU {
 
         let new_value = if is_imm {
             let src2 = self.sign_extend(instruction & 0x1F, 5);
-            self.registers.get(src1) + src2
+            self.registers.get(src1).wrapping_add(src2)
         } else {
             let src2 = instruction & 0x7;
-            self.registers.get(src1) + self.registers.get(src2)
+            self.registers
+                .get(src1)
+                .wrapping_add(self.registers.get(src2))
         };
 
         self.registers.set(dest, new_value);
@@ -135,17 +137,17 @@ impl CPU {
     /// If any of the condition codes tested is set, the program branches to the location specified by adding the
     /// sign-extended PCoffset9 field to the incremented PC.
     fn opcode_br(&mut self, instruction: u16) {
-        let offset = instruction & 0xFF;
-        let flag_n = (instruction >> 9) & 0x1 == 1;
+        let offset = self.sign_extend(instruction & 0x1FF, 9);
+        let flag_n = (instruction >> 11) & 0x1 == 1;
         let flag_z = (instruction >> 10) & 0x1 == 1;
-        let flag_p = (instruction >> 11) & 0x1 == 1;
+        let flag_p = (instruction >> 9) & 0x1 == 1;
 
         let cpu_flags = &self.registers.flags;
         if (flag_n && cpu_flags.negative)
             || (flag_z && cpu_flags.zero)
             || (flag_p && cpu_flags.positive)
         {
-            self.registers.pc += offset;
+            self.registers.pc = self.registers.pc.wrapping_add(offset);
         }
     }
 

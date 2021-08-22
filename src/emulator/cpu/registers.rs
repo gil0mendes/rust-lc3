@@ -1,7 +1,7 @@
 //! CPU registers for the LC-3 emulator
 
 /// LC-3 CPU condition flags
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Flags {
     pub negative: bool,
     pub zero: bool,
