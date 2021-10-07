@@ -1,0 +1,37 @@
+//Symbol Name		Page Address
+//----------------	------------
+//	addtestok               3029
+//	andtestok               305D
+//	array1                  309F
+//	branchnok               3014
+//	branchpok               301E
+//	branchzok               300B
+//	errorstring             30A7
+//	fntestr2                3099
+//	jmptestok               303F
+//	jsrrtestok              304A
+//	jsrtestok               3054
+//	lditestok               308D
+//	ldrtestok               3068
+//	nottestok               3081
+//	okstring                30A2
+//	pointer1                309E
+//	stitestok               3096
+//	stldtestok              3036
+//	strtestok               3076
+//	testadd                 30F5
+//	testand                 30D6
+//	testbranchn             30BC
+//	testbranchp             30C9
+//	testbranchz             30AF
+//	testjmp                 3111
+//	testjsr                 3130
+//	testjsrr                311E
+//	testldisti              3164
+//	testldr                 313D
+//	testlea                 30E3
+//	testnot                 3157
+//	testst                  3102
+//	teststr                 314A
+//	var1                    309C
+//	var2                    309D
