@@ -1,16 +1,11 @@
-use crate::emulator::memory::DeviceRegister;
-
 ///! Constrains the code to implement the Control Unit and ALU of the LC-3 machine.
 use self::{instructions::Instructions, registers::Registers, system_calls::SystemCall};
 
-use super::memory::Memory;
+use super::{memory::Memory, DeviceRegister, Events};
 
 mod instructions;
 mod registers;
 mod system_calls;
-
-/// This is the default PC value when the CPU starts
-const DEFAULT_PC: u16 = 0x3000;
 
 /// LC-3 CPU
 pub struct CPU {
@@ -20,13 +15,13 @@ pub struct CPU {
 
 impl CPU {
     /// Create a new CPU instance
-    pub fn new() -> Self {
+    pub fn new(initial_pc: u16) -> Self {
         let mut cpu = Self {
             registers: Registers::default(),
         };
 
         // define default PC address
-        cpu.registers.pc = DEFAULT_PC;
+        cpu.registers.pc = initial_pc;
 
         cpu
     }
@@ -36,7 +31,7 @@ impl CPU {
         &self.registers
     }
 
-    pub fn next_tick(&mut self, memory: &mut Memory) {
+    pub fn next_tick(&mut self, memory: &mut Memory, events: &mut Events) {
         // get the next instruction in memory
         let instruction_raw = memory.read(self.registers.pc);
 
@@ -44,11 +39,11 @@ impl CPU {
         self.registers.pc += 1;
 
         // process next opcode
-        self.next_opcode(instruction_raw, memory);
+        self.next_opcode(instruction_raw, memory, events);
     }
 
     /// Process the next opcode
-    pub fn next_opcode(&mut self, instruction: u16, memory: &mut Memory) {
+    pub fn next_opcode(&mut self, instruction: u16, memory: &mut Memory, events: &mut Events) {
         let opcode_raw = instruction >> 12;
         let opcode = Instructions::get(opcode_raw);
 
@@ -66,7 +61,7 @@ impl CPU {
             Some(Instructions::ST) => self.opcode_st(instruction, memory),
             Some(Instructions::STI) => self.opcode_sti(instruction, memory),
             Some(Instructions::STR) => self.opcode_str(instruction, memory),
-            Some(Instructions::TRAP) => self.opcode_trap(instruction, memory),
+            Some(Instructions::TRAP) => self.opcode_trap(instruction, memory, events),
             _ => panic!("CPU: instruction ({:?}) not implemented", opcode.unwrap()),
         };
     }
@@ -147,7 +142,8 @@ impl CPU {
             || (flag_z && cpu_flags.zero)
             || (flag_p && cpu_flags.positive)
         {
-            self.registers.pc = self.registers.pc.wrapping_add(offset);
+            let val: u32 = self.registers.pc as u32 + offset as u32;
+            self.registers.pc = val as u16;
         }
     }
 
@@ -159,12 +155,13 @@ impl CPU {
     /// The RET instruction is a special case of the JMP instruction. The PC is loaded with the contents of R7, which
     /// contains the linkage back to the instruction following the subroutine call instruction.
     fn opcode_jmp_ret(&mut self, instruction: u16) {
-        let base_addr = (instruction >> 6) & 0x7;
+        let reg_index = (instruction >> 6) & 0x7;
+        let is_ret = reg_index == 0x7;
 
-        if base_addr == 0x7 {
+        if is_ret {
             self.registers.pc = self.registers.r7;
         } else {
-            self.registers.pc = base_addr;
+            self.registers.pc = self.registers.get(reg_index);
         }
     }
 
@@ -184,7 +181,8 @@ impl CPU {
             let offset = instruction & 0x7ff;
             self.registers.pc = self.registers.pc + self.sign_extend(offset, 11);
         } else {
-            self.registers.pc = (instruction >> 6) & 0x7;
+            let reg_index = (instruction >> 6) & 0x7;
+            self.registers.pc = self.registers.get(reg_index);
         }
     }
 
@@ -227,12 +225,13 @@ impl CPU {
     /// The condition codes are set, based on whether the value loaded is negative, zero, or positive.
     fn opcode_ldr(&mut self, instruction: u16, memory: &Memory) {
         let target_index = (instruction >> 9) & 0x7;
-        let base_addr = (instruction >> 6) & 0x7;
+        let base_addr_reg_index = (instruction >> 6) & 0x7;
         let offset = instruction & 0x3F;
 
-        let value = memory.read(base_addr + self.sign_extend(offset, 6));
-        self.registers.set(target_index, value);
+        let register_val = self.registers.get(base_addr_reg_index);
+        let value = memory.read(register_val.wrapping_add(self.sign_extend(offset, 6)));
 
+        self.registers.set(target_index, value);
         self.registers.flags.update(value);
     }
 
@@ -260,8 +259,8 @@ impl CPU {
         let target_index = (instruction >> 9) & 0x7;
         let src_index = (instruction >> 6) & 0x7;
 
-        self.registers
-            .set(target_index, !self.registers.get(src_index));
+        let negated_val = !self.registers.get(src_index);
+        self.registers.set(target_index, negated_val);
     }
 
     /// ST operator
@@ -297,32 +296,60 @@ impl CPU {
     /// [8:6].
     fn opcode_str(&mut self, instruction: u16, memory: &mut Memory) {
         let src_index = (instruction >> 9) & 0x7;
-        let base_addr = (instruction >> 6) & 0x7;
+        let base_addr_reg_index = (instruction >> 6) & 0x7;
         let offset = self.sign_extend(instruction & 0x3F, 6);
 
-        memory.write(base_addr + offset, self.registers.get(src_index));
+        let base_addr = self.registers.get(base_addr_reg_index);
+        memory.write(
+            base_addr.wrapping_add(offset),
+            self.registers.get(src_index),
+        );
+    }
+
+    /// Handle events from the outside would.
+    fn handle_events(&mut self, memory: &mut Memory, events: &mut Events) {
+        // check if there is a event clearing the screen buffer
+        match events.receive() {
+            // when the display tells to the machine that is ready to receive another char to draw
+            (DeviceRegister::DisplayStatus, _) => {
+                memory.write(DeviceRegister::DisplayStatus as u16, 1 << 15);
+            }
+            // when the keyboard receives a new data
+            (DeviceRegister::KeyboardData, val) => {
+                memory.write(DeviceRegister::KeyboardData as u16, val);
+                memory.write(DeviceRegister::KeyboardStatus as u16, 1 << 15);
+            }
+            _ => {}
+        }
     }
 
     /// Add a new char to be printed
-    fn put_char(&mut self, char: u16, memory: &mut Memory) {
+    fn put_char(&mut self, char: u16, memory: &mut Memory, events: &mut Events) {
         // wait until the screen is ready to get another char
-        while memory.read(DeviceRegister::DisplayStatus as u16) >> 15 != 0x1 {
-            // TODO: maybe use a thread sleep
+        while memory.read(DeviceRegister::DisplayStatus as u16) >> 15 != 1 {
+            self.handle_events(memory, events);
         }
 
         memory.write(DeviceRegister::DisplayData as u16, char);
+        memory.write(DeviceRegister::DisplayStatus as u16, 0);
+
+        // notify world that there is a new char
+        events.send(DeviceRegister::DisplayData, char);
     }
 
-    fn opcode_trap(&mut self, instruction: u16, memory: &mut Memory) {
+    fn opcode_trap(&mut self, instruction: u16, memory: &mut Memory, events: &mut Events) {
         let system_call = SystemCall::get(instruction);
 
         match system_call {
             // Read a single character from the keyboard. The character is not echoed onto the console. Its ASCII code
             // is copied into R0. The high eight bits of R0 are cleared.
             Some(SystemCall::GETC) => {
+                // send event requesting a key
+                events.send(DeviceRegister::KeyboardStatus, 0);
+
                 // wait for a char to be ready
-                while memory.read(DeviceRegister::KeyboardStatus as u16) >> 15 != 0x1 {
-                    // TODO: maybe use a thread sleep
+                while memory.read(DeviceRegister::KeyboardStatus as u16) >> 15 != 1 {
+                    self.handle_events(memory, events);
                 }
 
                 self.registers.r0 = memory.read(DeviceRegister::KeyboardData as u16);
@@ -331,7 +358,7 @@ impl CPU {
             // Write a character in R0[7:0] to the console display.
             Some(SystemCall::OUT) => {
                 let char = self.registers.r0 as u8 as u16;
-                self.put_char(char, memory);
+                self.put_char(char, memory, events);
             }
 
             // Write a string of ASCII characters to the console display. The characters are contained in consecutive
@@ -342,7 +369,7 @@ impl CPU {
                 let mut char = memory.read(addr) as u8 as u16;
 
                 while char != 0x0000 {
-                    self.put_char(char, memory);
+                    self.put_char(char, memory, events);
 
                     addr += 1;
                     char = memory.read(addr) as u8 as u16;
@@ -352,14 +379,17 @@ impl CPU {
             // Print a prompt on the screen and read a single character from the keyboard. The character is echoed onto
             // the console monitor, and its ASCII code is copied into R0. The high eight bits of R0 are cleared.
             Some(SystemCall::IN) => {
+                // send event requesting a key
+                events.send(DeviceRegister::KeyboardStatus, 0);
+
                 // wait for a char to be ready
-                while memory.read(DeviceRegister::KeyboardStatus as u16) >> 15 != 0x1 {
-                    // TODO: maybe use a thread sleep
+                while memory.read(DeviceRegister::KeyboardStatus as u16) >> 15 != 1 {
+                    self.handle_events(memory, events);
                 }
 
                 self.registers.r0 = memory.read(DeviceRegister::KeyboardData as u16);
 
-                self.put_char(self.registers.r0, memory);
+                self.put_char(self.registers.r0, memory, events);
             }
 
             // Write a string of ASCII characters to the console. The characters are contained in consecutive memory
@@ -378,10 +408,10 @@ impl CPU {
                     let ch1 = char_entry & 0xFF as u8 as u16;
                     let ch2 = char_entry >> 8 as u8 as u16;
 
-                    self.put_char(ch1, memory);
+                    self.put_char(ch1, memory, events);
 
                     if ch2 != 0x00 {
-                        self.put_char(ch2, memory);
+                        self.put_char(ch2, memory, events);
                     }
 
                     addr += 1;
@@ -390,9 +420,10 @@ impl CPU {
             }
             // Halt execution and print a message on the console.
             Some(SystemCall::HALT) => {
-                memory.write(DeviceRegister::MachineControl as u16, 0x0);
+                memory.write(DeviceRegister::MachineControl as u16, 0);
             }
-            trap_code => panic!("Missing system call {:?}", trap_code),
+            // for any other code, just ignore
+            _ => {}
         };
     }
 }
