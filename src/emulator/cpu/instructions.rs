@@ -1,7 +1,7 @@
 //! CPU instructions declaration and  decoder
 
 /// LC-3 Instructions
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub enum Instructions {
     /// branch
     BR,
@@ -59,5 +59,30 @@ impl Instructions {
             15 => Some(Self::TRAP),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod instructions_test {
+    use super::*;
+
+    #[test]
+    fn instructions_initial_values() {
+        assert_eq!(Some(Instructions::BR), Instructions::get(0));
+        assert_eq!(Some(Instructions::ADD), Instructions::get(1));
+        assert_eq!(Some(Instructions::LD), Instructions::get(2));
+        assert_eq!(Some(Instructions::ST), Instructions::get(3));
+        assert_eq!(Some(Instructions::JSR), Instructions::get(4));
+        assert_eq!(Some(Instructions::AND), Instructions::get(5));
+        assert_eq!(Some(Instructions::LDR), Instructions::get(6));
+        assert_eq!(Some(Instructions::STR), Instructions::get(7));
+        assert_eq!(Some(Instructions::RTI), Instructions::get(8));
+        assert_eq!(Some(Instructions::NOT), Instructions::get(9));
+        assert_eq!(Some(Instructions::LDI), Instructions::get(10));
+        assert_eq!(Some(Instructions::STI), Instructions::get(11));
+        assert_eq!(Some(Instructions::JMP), Instructions::get(12));
+        assert_eq!(Some(Instructions::RES), Instructions::get(13));
+        assert_eq!(Some(Instructions::LEA), Instructions::get(14));
+        assert_eq!(Some(Instructions::TRAP), Instructions::get(15));
     }
 }
